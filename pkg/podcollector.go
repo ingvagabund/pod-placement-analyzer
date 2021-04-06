@@ -48,19 +48,21 @@ type Edge struct {
 
 type PodDisplacements map[string][][]Edge
 
-func (pd PodDisplacements) Dump() {
+func (pd PodDisplacements) Dump(minChainLen int) {
 	for owner, chains := range pd {
-		fmt.Printf("%v\n", owner)
 		for _, chain := range chains {
+			if len(chain) < minChainLen {
+				continue
+			}
 			str := ""
 			for idx, edge := range chain {
 				if idx == 0 {
-					str += fmt.Sprintf("%v -> %v", edge.In.UniqueKey(), edge.Out.UniqueKey())
+					str += fmt.Sprintf("\t%v(%v) ->\n\t%v(%v)", edge.In.PodName, edge.In.Node, edge.Out.PodName, edge.Out.Node)
 				} else {
-					str += fmt.Sprintf(" -> %v", edge.Out.UniqueKey())
+					str += fmt.Sprintf(" ->\n\t%v(%v)", edge.Out.PodName, edge.Out.Node)
 				}
 			}
-			fmt.Printf("%v\n", str)
+			fmt.Printf("%v (rescheduled=%v)\n%v\n", owner, len(chain), str)
 		}
 	}
 }
@@ -99,7 +101,7 @@ func (pc *PodCollector) Setup(ctx context.Context, sharedInformerFactory informe
 				if !ok {
 					return
 				}
-				fmt.Printf("Adding a pod: %v\n", getPodElements(pod)[0].String())
+				fmt.Printf("Adding a pod: %v/%v\n", pod.Namespace, pod.Name)
 				for _, element := range getPodElements(pod) {
 					pc.Record(element)
 				}
@@ -109,7 +111,7 @@ func (pc *PodCollector) Setup(ctx context.Context, sharedInformerFactory informe
 				if !ok {
 					return
 				}
-				fmt.Printf("Deleting a pod: %v\n", getPodElements(pod)[0].String())
+				fmt.Printf("Deleting a pod: %v/%v\n", pod.Namespace, pod.Name)
 				for _, element := range getPodElements(pod) {
 					pc.Record(element)
 				}
@@ -140,6 +142,8 @@ func (pc *PodCollector) Record(element *PodElement) {
 }
 
 func (pc *PodCollector) ComputePodTransitions() {
+	pc.podDisplacements = PodDisplacements{}
+
 	for key, podElements := range pc.elements {
 		edges := map[string]*PodElement{}
 		vertices := map[string]*PodElement{}
@@ -151,7 +155,7 @@ func (pc *PodCollector) ComputePodTransitions() {
 			edges[edge.In.PodName] = edge.Out
 			// fmt.Printf("# %v -> %v\n", edge.In.PodName, edge.Out.PodName)
 		}
-		pc.podDisplacements = PodDisplacements{}
+
 		for vertex := range edges {
 			if _, exists := notStart[vertex]; exists {
 				continue

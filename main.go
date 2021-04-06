@@ -6,6 +6,8 @@ import (
 	"io/ioutil"
 	"time"
 
+	"k8s.io/klog/v2"
+
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
@@ -17,13 +19,15 @@ func main() {
 
 	pc := pkg.NewPodCollector()
 
-	dat, _ := ioutil.ReadFile("testdata/pods.json")
-	fmt.Println(string(dat))
-	fmt.Printf("err: %v\n", pc.Import(dat))
+	dat, _ := ioutil.ReadFile("testdata/pods3.json")
+	if err := pc.Import(dat); err != nil {
+		klog.Errorf("Unable to import data: %v", err)
+		return
+	}
 
 	pc.ComputePodTransitions()
 
-	pc.PodDisplacements().Dump()
+	pc.PodDisplacements().Dump(3)
 
 	return
 
@@ -43,6 +47,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	pc.Setup(ctx, sharedInformerFactory)
+
 	pc.Run(ctx)
 
 	time.Sleep(time.Minute)
