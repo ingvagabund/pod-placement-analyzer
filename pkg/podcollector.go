@@ -10,7 +10,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/tools/cache"
-	"k8s.io/klog/v2"
 )
 
 type PodElement struct {
@@ -32,7 +31,7 @@ func (pe *PodElement) KindOwnerKey() string {
 }
 
 func (pe *PodElement) UniqueKey() string {
-	return fmt.Sprintf("%v/%v/%v/%v", pe.Namespace, pe.Kind, pe.KindName, pe.PodName)
+	return fmt.Sprintf("%v/%v/%v/%v/%v", pe.Namespace, pe.Kind, pe.KindName, pe.PodName, pe.CreationTimestamp.Unix())
 }
 
 func NewPodCollector() *PodCollector {
@@ -57,6 +56,7 @@ func (pd PodDisplacements) Dump(minChainLen int) {
 			str := ""
 			for idx, edge := range chain {
 				if idx == 0 {
+					// fmt.Printf("edge.In.UniqueKey(): %v\n", edge.In.UniqueKey())
 					str += fmt.Sprintf("\t%v(%v) ->\n\t%v(%v)", edge.In.PodName, edge.In.Node, edge.Out.PodName, edge.Out.Node)
 				} else {
 					str += fmt.Sprintf(" ->\n\t%v(%v)", edge.Out.PodName, edge.Out.Node)
@@ -149,10 +149,10 @@ func (pc *PodCollector) ComputePodTransitions() {
 		vertices := map[string]*PodElement{}
 		notStart := map[string]struct{}{}
 		for _, edge := range pc.computeKindOwnerPodTransitions(key, podElements) {
-			vertices[edge.In.PodName] = edge.In
-			vertices[edge.Out.PodName] = edge.Out
-			notStart[edge.Out.PodName] = struct{}{}
-			edges[edge.In.PodName] = edge.Out
+			vertices[edge.In.UniqueKey()] = edge.In
+			vertices[edge.Out.UniqueKey()] = edge.Out
+			notStart[edge.Out.UniqueKey()] = struct{}{}
+			edges[edge.In.UniqueKey()] = edge.Out
 			// fmt.Printf("# %v -> %v\n", edge.In.PodName, edge.Out.PodName)
 		}
 
@@ -164,9 +164,9 @@ func (pc *PodCollector) ComputePodTransitions() {
 			placements := []Edge{}
 			for {
 				if _, exists := edges[vertex]; exists {
-					placements = append(placements, Edge{In: vertices[vertex], Out: vertices[edges[vertex].PodName]})
+					placements = append(placements, Edge{In: vertices[vertex], Out: vertices[edges[vertex].UniqueKey()]})
 					// fmt.Printf("%v -> %v\n", vertex, edges[vertex].PodName)
-					vertex = edges[vertex].PodName
+					vertex = edges[vertex].UniqueKey()
 				} else {
 					break
 				}
@@ -184,16 +184,12 @@ func (pc *PodCollector) computeKindOwnerPodTransitions(kindOwner string, element
 	uniquePods := map[string]*PodElement{}
 	for _, elm := range elements {
 		if _, exists := uniquePods[elm.PodName]; !exists {
-			uniquePods[elm.PodName] = elm
+			uniquePods[elm.UniqueKey()] = elm
 		} else {
-			if !uniquePods[elm.PodName].CreationTimestamp.Equal(&elm.CreationTimestamp) {
-				klog.Warningf("Detected two pods with %q name but different CreationTimestamp: %v != %v", elm.PodName, uniquePods[elm.PodName].CreationTimestamp, elm.CreationTimestamp)
-			} else {
-				// Add missing DeletionTimestamp
-				if uniquePods[elm.PodName].DeletionTimestamp == nil && elm.DeletionTimestamp != nil {
-					// fmt.Printf("%v: %v - %v\n", elm.PodName, uniquePods[elm.PodName].DeletionTimestamp, elm.DeletionTimestamp)
-					uniquePods[elm.PodName] = elm
-				}
+			// Add missing DeletionTimestamp
+			if uniquePods[elm.UniqueKey()].DeletionTimestamp == nil && elm.DeletionTimestamp != nil {
+				// fmt.Printf("%v: %v - %v\n", elm.PodName, uniquePods[elm.PodName].DeletionTimestamp, elm.DeletionTimestamp)
+				uniquePods[elm.UniqueKey()] = elm
 			}
 		}
 	}
